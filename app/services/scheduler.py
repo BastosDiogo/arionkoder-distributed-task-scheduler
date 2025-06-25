@@ -3,6 +3,7 @@ import threading
 import time
 from services.task import Task
 from datetime import datetime
+from utilities.logs import Logging
 
 
 class Scheduler:
@@ -12,8 +13,8 @@ class Scheduler:
         self.pending_dependencies = {}
         self.workers = {}
         self.worker_heartbeats = {}
-
         self.lock = threading.Lock()
+        self.logging = Logging()
 
     def add_task(self, task: Task):
         with self.lock:
@@ -64,7 +65,7 @@ class Scheduler:
     def update_task_status(self, task_id, status, result=None, error_message=None, worker_id=None):
         with self.lock:
             if task_id not in self.all_tasks:
-                print(f"Erro: Tarefa {task_id} não encontrada.")
+                self.logging.error(f"Erro: Task {task_id} not found.")
                 return
 
             task = self.all_tasks[task_id]
@@ -82,25 +83,25 @@ class Scheduler:
                             dependent_task = self.all_tasks[dependent_task_id]
                             heapq.heappush(self.task_queue, (-dependent_task.priority, dependent_task.created_at, dependent_task.task_id))
                             dependent_task.status = "PENDING"
-                print(f"Tarefa {task.task_id} COMPLETA por {task.worker_id}. Resultado: {result}")
+                self.logging.info(f"Task {task.task_id} COMPLETE by {task.worker_id}. Result: {result}")
             elif status == "FAILED":
                 task.retries += 1
                 if task.retries < task.max_retries:
                     task.status = "PENDING"
                     heapq.heappush(self.task_queue, (-task.priority, task.created_at, task.task_id))
-                    print(f"Tarefa {task.task_id} FALHOU. Tentando novamente ({task.retries}/{task.max_retries}). Erro: {error_message}")
+                    self.logging.info(f"Task {task.task_id} FAILD. Trying ({task.retries}/{task.max_retries}). Error: {error_message}")
                 else:
-                    print(f"Tarefa {task.task_id} FALHOU definitivamente após {task.max_retries} tentativas. Erro: {error_message}")
+                    self.logging.error(f"Task {task.task_id} FAILD definitely after {task.max_retries} retries. Error: {error_message}")
             elif status == "CANCELED":
-                print(f"Tarefa {task.task_id} CANCELADA.")
+                self.logging.info(f"Task {task.task_id} CANCELADA.")
             elif status == "TIMED_OUT":
                 task.retries += 1
                 if task.retries < task.max_retries:
                     task.status = "PENDING"
                     heapq.heappush(self.task_queue, (-task.priority, task.created_at, task.task_id))
-                    print(f"Tarefa {task.task_id} TEMPO LIMITE EXCEDIDO. Tentando novamente ({task.retries}/{task.max_retries}).")
+                    self.logging.warning(f"Task {task.task_id} TIME EXECEEDED. Trying again ({task.retries}/{task.max_retries}).")
                 else:
-                    print(f"Tarefa {task.task_id} TEMPO LIMITE EXCEDIDO definitivamente após {task.max_retries} tentativas.")
+                    self.logging.error(f"Task {task.task_id} TIME EXECEEDED definitely after {task.max_retries} retries.")
 
     def cancel_task(self, task_id):
         with self.lock:
@@ -110,28 +111,28 @@ class Scheduler:
                 if self.all_tasks[task_id].status == "PENDING":
                     self.task_queue = [item for item in self.task_queue if item[2] != task_id]
                     heapq.heapify(self.task_queue)
-                print(f"Requisição de cancelamento para a tarefa {task_id} enviada.")
+                self.logging.info(f"Cancel request to task_id {task_id} has sent.")
                
 
     def register_worker(self, worker_id):
         with self.lock:
             self.workers[worker_id] = {"status": "ACTIVE", "last_heartbeat": time.time()}
             self.worker_heartbeats[worker_id] = time.time()
-            print(f"Worker {worker_id} registrado.")
+            self.logging.info(f"Worker {worker_id} registred.")
 
     def unregister_worker(self, worker_id):
         with self.lock:
             if worker_id in self.workers:
                 del self.workers[worker_id]
                 del self.worker_heartbeats[worker_id]
-                print(f"Worker {worker_id} desregistrado.")
+                self.logging.info(f"Worker {worker_id} unregistred.")
                
                 for task_id, task in self.all_tasks.items():
                     if task.worker_id == worker_id and task.status == "RUNNING":
                         task.status = "PENDING"
                         heapq.heappush(self.task_queue, (-task.priority, task.created_at, task.task_id))
                         task.worker_id = None
-                        print(f"Tarefa {task_id} do worker {worker_id} que falhou, re-enfileirada.")
+                        self.logging.warning(f"Task_id {task_id} with worker_id {worker_id} has faild. It was send to queue.")
 
 
     def worker_heartbeat(self, worker_id):
@@ -146,7 +147,7 @@ class Scheduler:
             current_time = time.time()
             for worker_id, last_heartbeat in list(self.worker_heartbeats.items()):
                 if current_time - last_heartbeat > timeout_seconds:
-                    print(f"Worker {worker_id} inativo detectado! Removendo e re-enfileirando suas tarefas.")
+                    self.logging.warning(f"Worker_id {worker_id} inactive has been detected! Removing and send to queue tasks.")
                     self.unregister_worker(worker_id)
 
     def monitor_tasks_timeout(self):
@@ -156,8 +157,7 @@ class Scheduler:
                 if task.status == "RUNNING" and task.timeout is not None:
                     if (current_time - task.started_at).total_seconds() > task.timeout:
                         self.update_task_status(task_id, "TIMED_OUT", worker_id=task.worker_id)
-                       
-                        print(f"Tarefa {task_id} excedeu o tempo limite no worker {task.worker_id}.")
+                        self.logging.warning(f"Task_id {task_id} worker timed out {task.worker_id}.")
 
     def get_status_report(self):
         with self.lock:
