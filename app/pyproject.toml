@@ -1,0 +1,14 @@
+[tool.poetry]
+name = "arionkoder-distributed-task-scheduler"
+package-mode = false
+version = "0"
+description = "Distributed Task Scheduler"
+authors = ["Diogo Bastos <bmnetto.diogo@gmail.com>"]
+
+[tool.poetry-version-plugin]
+source = ".version"
+
+[tool.poetry.dependencies]
+fastapi = {extras = ["all"], version = "^0.115.12"}
+python = "^3.12"
+requests = "^2.32.3"
