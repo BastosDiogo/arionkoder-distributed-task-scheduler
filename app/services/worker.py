@@ -1,8 +1,8 @@
 import threading
 import time
 import requests
-import json
 from services.task import Task
+from utilities.logs import Logging
 
 
 class Worker:
@@ -13,6 +13,7 @@ class Worker:
         self.current_task = None
         self.heartbeat_thread = None
         self.execution_thread = None
+        self.logging = Logging()
 
     def _send_heartbeat(self):
         while self.is_running:
@@ -20,7 +21,7 @@ class Worker:
                 requests.put(f"{self.scheduler_url}/heartbeat/{self.worker_id}")
 
             except requests.exceptions.ConnectionError:
-                print(f"Worker {self.worker_id}: Não foi possível conectar ao scheduler.")
+                self.logging.info(f"Worker_id {self.worker_id}: Unable to connect to scheduler.")
             time.sleep(5)
 
     def _execute_task(self, task_data):
@@ -32,7 +33,7 @@ class Worker:
 
         task = Task.from_dict(task_data, func_map=available_functions)
         self.current_task = task
-        print(f"Worker {self.worker_id}: Executando tarefa {task.task_id} ({task.func.__name__})...")
+        self.logging.info(f"Worker_id {self.worker_id}: Runing task_id {task.task_id} ({task.func.__name__})...")
 
         try:
             if task.func.__name__ not in available_functions:
@@ -45,7 +46,7 @@ class Worker:
                 "result": str(result),
                 "worker_id": self.worker_id
             })
-            print(f"Worker {self.worker_id}: Tarefa {task.task_id} CONCLUÍDA. Resultado: {result}")
+            self.logging.info(f"Worker_id {self.worker_id}: Task_id {task.task_id} COMPLET. Result: {result}")
 
         except Exception as e:
             requests.post(f"{self.scheduler_url}/task_status", json={
@@ -54,14 +55,14 @@ class Worker:
                 "error_message": str(e),
                 "worker_id": self.worker_id
             })
-            print(f"Worker {self.worker_id}: Tarefa {task.task_id} FALHOU. Erro: {e}")
+            self.logging.error(f"Worker_id {self.worker_id}: Task_id {task.task_id} FAILD. Error: {e}")
         finally:
             self.current_task = None
 
 
     def start(self):
         self.is_running = True
-        print(f"Worker {self.worker_id} iniciado.")
+        self.logging.info(f"Worker_id {self.worker_id} running.")
         self.heartbeat_thread = threading.Thread(target=self._send_heartbeat, daemon=True)
         self.heartbeat_thread.start()
 
@@ -80,22 +81,22 @@ class Worker:
                     time.sleep(2)
 
                 else:
-                    print(f"Worker {self.worker_id}: Erro ao obter tarefa: {response.status_code} - {response.text}")
+                    self.logging.error(f"Worker_id {self.worker_id}: Error: {response.status_code} - {response.text}")
                     time.sleep(5)
 
             except requests.exceptions.ConnectionError:
-                print(f"Worker {self.worker_id}: Conexão com o scheduler perdida. Tentando novamente...")
+                self.logging.warning(f"Worker_id {self.worker_id}: Connection to scheduler lost. Trying again...")
                 time.sleep(5)
 
             except Exception as e:
-                print(f"Worker {self.worker_id}: Erro inesperado no loop principal: {e}")
+                self.logging.error(f"Worker_id {self.worker_id}: Unexpected error in main loop: {e}")
                 time.sleep(5)
 
 
     def stop(self):
         self.is_running = False
-        print(f"Worker {self.worker_id} parado.")
+        self.logging.info(f"Worker_id {self.worker_id} stoped.")
         try:
             requests.delete(f"{self.scheduler_url}/unregister/{self.worker_id}")
         except requests.exceptions.ConnectionError:
-            print(f"Worker {self.worker_id}: Não foi possível desregistrar no scheduler.")
+            self.logging.info(f"Worker_id {self.worker_id}: Unable to unregister from scheduler.")
